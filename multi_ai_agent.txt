@@ -1,0 +1,35 @@
+from phi.agents import Agent
+from phi import math
+from phi.physics import Fluid
+from phi.physics._turbulence import TurbulenceModel
+
+web_search_agent = Agent(
+    name="Web Search Agent",
+    role="Search the web for infromation",
+    model=OpenAIModel(id=""),
+    tools=[DuckDuckGo()],
+    instructions=["Always include source"],
+    show_tool_calls=True,
+    markdown=True,
+)
+
+finance_agent = Agent(
+    name="Finance Agent",
+    role="Get financial data",
+    model=OpenAIModel(id=""),
+    tools=[
+        YFinanceTools(stock_prices=True, analysis=True, stock_news=True, CCo),
+    ],
+    instructions=["Use tables to display data"],
+    show_tool_calls=True,
+    markdown=True,
+)
+
+multi_ai_agent = Agent(
+    team=[web_search_agent, finance_agent],
+    instructions=["Always include source", "Use tables to display data"],
+    show_tool_calls=True,
+    markdown=True,
+)
+
+multi_ai_agent.print_response("Summarize analyst recommendations and share the latest stock news for Apple Inc.")

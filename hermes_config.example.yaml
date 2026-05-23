@@ -1,0 +1,160 @@
+# Hermes Agent Configuration for Trading System
+# Copy to ~/.hermes/config.yaml and customize
+
+# Model Configuration
+model:
+  provider: "openrouter" # or groq, openai, anthropic, etc.
+  name: "openrouter/nous-hermes-2-mixtral-8x7b-dpo" # Your preferred model
+
+# API Keys (store in ~/.hermes/.env instead!)
+# Never put keys in this file
+credentials:
+  openrouter: "${OPENROUTER_API_KEY}" # From ~/.hermes/.env
+  groq: "${GROQ_API_KEY}" # From ~/.hermes/.env
+
+# Terminal Configuration
+terminal:
+  backend: "local" # Can be: local, docker, ssh, modal, daytona
+  env_passthrough:
+    - "PATH"
+    - "HOME"
+    - "GROQ_API_KEY"
+    - "OPENROUTER_API_KEY"
+    - "HERMES_DATA_PROVIDER"
+    - "HERMES_SYMBOL"
+    - "HERMES_WATCHLIST"
+    - "HERMES_INTERVAL"
+    - "DERIV_APP_ID"
+    - "OANDA_API_KEY"
+    - "OANDA_ACCOUNT_ID"
+    - "OANDA_ENV"
+    - "TWELVE_DATA_API_KEY"
+    - "TELEGRAM_BOT_TOKEN"
+    - "TELEGRAM_ALLOWED_USERS"
+
+# Approval System (security gate for dangerous operations)
+approvals:
+  mode: "on" # on, auto (with delay), or off
+  auto_delay_seconds: 5 # For auto mode
+
+# Messaging Gateway Configuration
+gateway:
+  # Telegram
+  telegram:
+    enabled: false
+    token: "${TELEGRAM_BOT_TOKEN}" # From ~/.hermes/.env
+    allowed_users:
+      - YOUR_TELEGRAM_USER_ID
+
+  # Discord
+  discord:
+    enabled: false
+    token: "${DISCORD_BOT_TOKEN}"
+    allowed_users:
+      - YOUR_DISCORD_USER_ID
+
+# Skills Configuration
+skills:
+  # Trading skill
+  trading:
+    path: "/home/godwin/Downloads/AI_agent/hermes_trading_skill.py"
+    enabled: true
+    description: "Multi-agent forex trading system with LLM-powered decision making"
+    tools:
+      - name: "trading_signal"
+        description: "Get next trading signal from multi-agent system"
+        fn: "skill_handler"
+        args: { action: "signal" }
+      - name: "trading_signals_watchlist"
+        description: "Get trading signals for the configured watchlist"
+        fn: "skill_handler"
+        args: { action: "signals" }
+      - name: "backtest_report"
+        description: "Run backtest and get performance metrics"
+        fn: "skill_handler"
+        args: { action: "backtest" }
+      - name: "retrain_model"
+        description: "Trigger PPO model retraining"
+        fn: "skill_handler"
+        args: { action: "retrain", timesteps: 100000 }
+      - name: "trading_stats"
+        description: "Get current trading statistics"
+        fn: "skill_handler"
+        args: { action: "stats" }
+      - name: "reward_signal"
+        description: "Reward a previous trading signal after it worked"
+        fn: "skill_handler"
+        args: { action: "feedback", outcome: "win", reward: 1.0 }
+      - name: "penalize_signal"
+        description: "Penalize a previous trading signal after it failed"
+        fn: "skill_handler"
+        args: { action: "feedback", outcome: "loss", reward: -1.0 }
+      - name: "trading_learning_summary"
+        description: "Show reward and penalty memory from past signals"
+        fn: "skill_handler"
+        args: { action: "learning" }
+
+# Cron Jobs (scheduled automations)
+cron:
+  jobs:
+    # Generate daily trading signals
+    daily_signal:
+      schedule: "0 9 * * MON-FRI" # 9 AM weekdays
+      description: "Daily market open trading signal"
+      action: |
+        [User]: Run the daily trading signal analysis and send results to Telegram
+      delivery:
+        platforms: ["telegram"]
+        user_id: "YOUR_TELEGRAM_USER_ID"
+
+    # Weekly backtest
+    weekly_backtest:
+      schedule: "0 18 * * FRI" # 6 PM Friday
+      description: "Weekly backtest and performance review"
+      action: |
+        [User]: Run a comprehensive backtest on the week's data and provide a summary report
+      delivery:
+        platforms: ["telegram"]
+        user_id: "YOUR_TELEGRAM_USER_ID"
+
+    # Monthly retraining
+    monthly_retrain:
+      schedule: "0 2 1 * *" # 2 AM on 1st of month
+      description: "Monthly model retraining with latest data"
+      action: |
+        [User]: Retrain the PPO model with 300000 steps and verify performance improvement
+      delivery:
+        platforms: ["telegram"]
+        user_id: "YOUR_TELEGRAM_USER_ID"
+
+# Memory Configuration
+memory:
+  type: "sqlite" # Hermes' persistent memory
+  path: "~/.hermes/memory"
+
+# Personality/Context
+personality: |
+  You are an expert forex trading agent with deep knowledge of:
+  - Technical analysis (RSI, moving averages, ATR, Bollinger bands)
+  - Reinforcement learning (PPO algorithm, reward shaping)
+  - Risk management (position sizing, stop-loss, take-profit calculations)
+  - LLM-powered decision making with multi-agent coordination
+
+  When analyzing trades:
+  - Explain your reasoning clearly
+  - Consider both technical and sentiment factors
+  - Validate against historical backtest performance
+  - Recommend position size based on account risk tolerance
+
+  Current system:
+  - Forex pair: EURUSD (1-hour candles)
+  - Training data: 2020-07-01 to 2023-07-15
+  - Test data: 2023-02-20 to 2025-02-22
+  - Best model checkpoint: 100,000 steps PPO
+  - Win rate: 6.3% (highly selective entries)
+  - Risk/Reward: 1:2 typical configuration
+
+# Logging
+logging:
+  level: "info" # debug, info, warning, error
+  file: "~/.hermes/logs/trading.log"
