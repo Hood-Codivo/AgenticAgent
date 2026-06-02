@@ -1,0 +1,33 @@
+services:
+  - type: worker
+    name: hermes-trading-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python telegram_bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_USERS
+        sync: false
+      - key: TELEGRAM_ALERT_CHAT_IDS
+        sync: false
+      - key: HERMES_DATA_PROVIDER
+        value: yfinance
+      - key: HERMES_SYMBOL
+        value: EURUSD
+      - key: HERMES_WATCHLIST
+        value: EURUSD,GBPUSD,AAPL,BTCUSD
+      - key: HERMES_INTERVAL
+        value: 1h
+      - key: HERMES_ALERT_MONITOR
+        value: "true"
+      - key: HERMES_ALERT_POLL_SECONDS
+        value: "900"
+      - key: HERMES_ALERT_QUALITY_MIN
+        value: "90"
+      - key: HERMES_ALERT_REPEAT_SECONDS
+        value: "21600"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false

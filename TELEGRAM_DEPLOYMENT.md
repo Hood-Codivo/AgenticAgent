@@ -190,7 +190,54 @@ Start the standalone Telegram bot:
 venv/bin/python telegram_bot.py
 ```
 
-## 6. Keep It Running With systemd
+## 6. Deploy on Render Background Worker
+
+Render must use a Python version compatible with the pinned ML stack. This repo
+includes `runtime.txt` with:
+
+```text
+python-3.12.8
+```
+
+Without that file, Render may choose a newer default Python version. The pinned
+`torch==2.6.0` dependency does not publish wheels for Python 3.14, which causes
+the build failure:
+
+```text
+ERROR: No matching distribution found for torch==2.6.0
+```
+
+Use these Render settings for a manually created Background Worker:
+
+```text
+Build command: pip install -r requirements.txt
+Start command: python telegram_bot.py
+```
+
+Set secrets in Render Environment, not in files committed to GitHub:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_ALLOWED_USERS
+TELEGRAM_ALERT_CHAT_IDS
+GROQ_API_KEY
+OPENROUTER_API_KEY
+```
+
+Set the non-secret worker config in Render Environment too:
+
+```text
+HERMES_DATA_PROVIDER=yfinance
+HERMES_SYMBOL=EURUSD
+HERMES_WATCHLIST=EURUSD,GBPUSD,AAPL,BTCUSD
+HERMES_INTERVAL=1h
+HERMES_ALERT_MONITOR=true
+HERMES_ALERT_POLL_SECONDS=900
+HERMES_ALERT_QUALITY_MIN=90
+HERMES_ALERT_REPEAT_SECONDS=21600
+```
+
+## 7. Keep It Running With systemd
 
 Create service:
 
