@@ -193,13 +193,14 @@ venv/bin/python telegram_bot.py
 ## 6. Deploy on Render Background Worker
 
 Render must use a Python version compatible with the pinned ML stack. This repo
-includes `runtime.txt` with:
+includes `.python-version` with:
 
 ```text
-python-3.12.8
+3.12.8
 ```
 
-Without that file, Render may choose a newer default Python version. The pinned
+The Render Blueprint also sets `PYTHON_VERSION=3.12.8`. Without one of those
+version pins, Render may choose a newer default Python version. The pinned
 `torch==2.6.0` dependency does not publish wheels for Python 3.14, which causes
 the build failure:
 
@@ -227,6 +228,7 @@ OPENROUTER_API_KEY
 Set the non-secret worker config in Render Environment too:
 
 ```text
+PYTHON_VERSION=3.12.8
 HERMES_DATA_PROVIDER=yfinance
 HERMES_SYMBOL=EURUSD
 HERMES_WATCHLIST=EURUSD,GBPUSD,AAPL,BTCUSD
