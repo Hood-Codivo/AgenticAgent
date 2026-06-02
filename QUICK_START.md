@@ -153,11 +153,11 @@ stats = skill.get_trading_stats()
     "quantity": 10324.08,
     "risk_usd": 200
   },
-  "market_analysis": {
-    "rsi": 53.15,
-    "ma_trend": "BULLISH",
-    "volatility": 0.00129,
-    "price_position": "BEARISH"
+  "market_structure": {
+    "trend": "UPTREND",
+    "structure": "HH_HL",
+    "break_of_structure": "BULLISH_BOS",
+    "entry_bias": "Buy the dip at the higher low, then ride the break above the prior high"
   }
 }
 ```
@@ -190,13 +190,13 @@ Your Trading System (Hermes-Compatible)
 │     └─ retrain_model()          → Update PPO model
 │
 ├─ multi_agent_trading.py
-│  ├─ DataCollectorAgent          → Fetch OHLCV + indicators
-│  ├─ AnalystAgent                → Technical analysis (RSI, MA, ATR)
+│  ├─ DataCollectorAgent          → Fetch OHLCV candles
+│  ├─ AnalystAgent                → Pure price action structure
 │  ├─ DecisionMakerAgent          → LLM decision (Groq or rule-based)
 │  └─ RiskManagerAgent            → Position sizing + SL/TP
 │
-└─ Data
-   └─ EURUSD_Candlestick_1_Hour_BID_01.07.2020-15.07.2023.csv
+└─ Live Market Data
+   └─ yfinance / Deriv / OANDA / Twelve Data
 ```
 
 ---
@@ -209,7 +209,7 @@ Your Trading System (Hermes-Compatible)
 - ✅ Risk-managed position sizing
 - ✅ Trade history tracking
 - ✅ Performance statistics
-- ✅ Technical indicator analysis
+- ✅ Pure price-action structure analysis
 - ✅ Fallback rule-based decision making
 
 ### With Hermes + API Key

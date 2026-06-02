@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Multi-Agent Trading System - DEMO (Rule-Based Fallback)
-This works WITHOUT an API key - uses technical analysis only
+This works WITHOUT an API key - uses pure price-action structure only
 """
 
 import os
@@ -22,8 +22,16 @@ def main():
     print("\n⚠️  Running in RULE-BASED mode (no API key needed)")
     print("To enable LLM reasoning, set: export GROQ_API_KEY='your-key'\n")
     
-    # Initialize agents
-    collector = DataCollectorAgent("data/EURUSD_Candlestick_1_Hour_BID_01.07.2020-15.07.2023.csv")
+    # Initialize agents with live data by default
+    data_provider = os.environ.get("HERMES_DATA_PROVIDER", "yfinance")
+    symbol = os.environ.get("HERMES_SYMBOL", "EURUSD")
+    interval = os.environ.get("HERMES_INTERVAL", "1h")
+    collector = DataCollectorAgent(
+        None,
+        live_provider=data_provider,
+        symbol=symbol,
+        interval=interval,
+    )
     analyst = AnalystAgent()
     decision_maker = DecisionMakerAgent(use_groq=False)  # Force rule-based
     risk_manager = RiskManagerAgent()
@@ -56,10 +64,14 @@ def main():
     print(f"Reasoning:   {decision['reasoning']}")
     
     # ========== AGENT 4: RISK MANAGER ==========
-    print("\n[AGENT 4] 💰 RISK MANAGER")
+    print("\n[AGENT 4] RISK MANAGER")
     print("-" * 70)
-    atr = market_data['indicators']['atr_14']
-    position = risk_manager.calculate_position(decision, market_data['price'], atr)
+    position = risk_manager.calculate_position(
+        decision,
+        market_data['price'],
+        analysis.get('market_structure'),
+        symbol=market_data.get('symbol', 'EURUSD'),
+    )
     print(f"Action:      {position['action']}")
     if position['action'] != 'HOLD':
         print(f"Quantity:    {position['quantity']:.2f} lots")
@@ -77,9 +89,7 @@ def main():
         "timestamp": datetime.now().isoformat(),
         "market": {
             "price": market_data['price'],
-            "rsi": market_data['indicators']['rsi_14'],
-            "ma20": market_data['indicators']['ma_20'],
-            "ma50": market_data['indicators']['ma_50'],
+            "structure": analysis.get('market_structure'),
         },
         "analysis": analysis['overall_signal'],
         "decision": decision['decision'],

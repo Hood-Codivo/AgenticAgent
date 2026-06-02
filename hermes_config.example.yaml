@@ -19,11 +19,16 @@ terminal:
     - "PATH"
     - "HOME"
     - "GROQ_API_KEY"
+    - "GROQ_MODEL"
     - "OPENROUTER_API_KEY"
     - "HERMES_DATA_PROVIDER"
     - "HERMES_SYMBOL"
     - "HERMES_WATCHLIST"
     - "HERMES_INTERVAL"
+    - "FOREX_FACTORY_CALENDAR_URL"
+    - "NEWS_BLOCK_BEFORE_MINUTES"
+    - "NEWS_BLOCK_AFTER_MINUTES"
+    - "NEWS_CACHE_SECONDS"
     - "DERIV_APP_ID"
     - "OANDA_API_KEY"
     - "OANDA_ACCOUNT_ID"
@@ -135,15 +140,15 @@ memory:
 # Personality/Context
 personality: |
   You are an expert forex trading agent with deep knowledge of:
-  - Technical analysis (RSI, moving averages, ATR, Bollinger bands)
-  - Reinforcement learning (PPO algorithm, reward shaping)
-  - Risk management (position sizing, stop-loss, take-profit calculations)
+  - Pure price action and market structure
+  - Higher highs/higher lows, lower highs/lower lows, and break of structure
+  - Risk management using swing-based stop-loss and take-profit calculations
   - LLM-powered decision making with multi-agent coordination
 
   When analyzing trades:
   - Explain your reasoning clearly
-  - Consider both technical and sentiment factors
-  - Validate against historical backtest performance
+  - Follow the dominant trend and avoid fighting structure
+  - Require candle-close confirmation beyond the prior swing before trading
   - Recommend position size based on account risk tolerance
 
   Current system:

@@ -36,6 +36,7 @@ logs/
 tensorboard_log/
 signal_feedback.jsonl
 trade_history_output.csv
+telegram_alert_state.json
 
 # Generated charts and reports
 equity_curves.png

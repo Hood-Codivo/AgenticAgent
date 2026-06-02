@@ -1,4 +1,6 @@
+
 """
+
 Hermes Trading Skill - Wraps trading system as Hermes-compatible tools.
 
 This skill exposes your existing trading system to Hermes Agent, allowing:
@@ -12,6 +14,8 @@ Usage in Hermes:
   /backtest_report     - Run backtest and get summary
   /retrain_model       - Trigger model retraining
   /trading_stats       - Get account and trade statistics
+
+
 """
 
 import json
@@ -32,7 +36,7 @@ from multi_agent_trading import (
     DecisionMakerAgent,
     RiskManagerAgent,
 )
-from live_market_data import live_provider_enabled
+from news_risk_agent import NewsRiskAgent
 from signal_memory import SignalMemory
 import os
 
@@ -47,8 +51,7 @@ class TradingSkill:
         data_provider: Optional[str] = None,
     ):
         """Initialize trading agents."""
-        csv_path = PROJECT_ROOT / "data" / "EURUSD_Candlestick_1_Hour_BID_01.07.2020-15.07.2023.csv"
-        requested_provider = data_provider or os.environ.get("HERMES_DATA_PROVIDER")
+        requested_provider = data_provider or os.environ.get("HERMES_DATA_PROVIDER", "yfinance")
         live_provider = (
             requested_provider
             if requested_provider and requested_provider.lower() != "csv"
@@ -57,7 +60,7 @@ class TradingSkill:
         symbol = symbol or os.environ.get("HERMES_SYMBOL", "EURUSD")
         interval = interval or os.environ.get("HERMES_INTERVAL", "1h")
         self.data_collector = DataCollectorAgent(
-            str(csv_path),
+            None,
             live_provider=live_provider,
             symbol=symbol,
             interval=interval,
@@ -67,6 +70,7 @@ class TradingSkill:
         # Get Groq API key from environment
         groq_api_key = os.environ.get("GROQ_API_KEY")
         self.decision_maker = DecisionMakerAgent(use_groq=bool(groq_api_key), api_key=groq_api_key)
+        self.news_risk_agent = NewsRiskAgent()
         self.risk_manager = RiskManagerAgent()
         self.last_signal = None
         self.trade_log = PROJECT_ROOT / "trade_history_output.csv"
@@ -90,18 +94,28 @@ class TradingSkill:
             market_data = self.data_collector.get_latest_market_data()
             current_price = market_data["price"]
             
-            # Agent 2: Analyze technical indicators
+            # Agent 2: Analyze pure price-action market structure
             analysis = self.analyst.analyze(market_data)
+
+            # Agent 3: Block fresh entries around high-impact news
+            news_risk = self.news_risk_agent.evaluate(market_data.get("symbol", "EURUSD"))
             
-            # Agent 3: Make decision
-            decision = self.decision_maker.decide(analysis)
+            # Agent 4: Make decision
+            if news_risk["should_block"]:
+                decision = {
+                    "decision": "HOLD",
+                    "confidence": 0.0,
+                    "reasoning": news_risk["reason"],
+                    "method": "ForexFactory News Risk Filter",
+                }
+            else:
+                decision = self.decision_maker.decide(analysis)
             
-            # Agent 4: Calculate risk management
-            atr = market_data["indicators"]["atr_14"]
+            # Agent 5: Calculate risk management from structure swings
             position = self.risk_manager.calculate_position(
                 decision,
                 current_price,
-                atr,
+                analysis.get("market_structure"),
                 symbol=market_data.get("symbol", "EURUSD"),
             )
             
@@ -111,15 +125,16 @@ class TradingSkill:
                 "data_provider": market_data.get("data_provider", "csv"),
                 "action": decision["decision"],
                 "confidence": decision["confidence"],
+                "quality_score": self._calculate_quality_score(
+                    decision,
+                    analysis.get("market_structure"),
+                    news_risk,
+                ),
                 "current_price": current_price,
                 "reasoning": decision.get("reasoning", "No specific reason"),
                 "position": position,
-                "market_analysis": {
-                    "rsi": market_data["indicators"]["rsi_14"],
-                    "ma_trend": analysis["detailed_signals"]["ma_signal"],
-                    "volatility": market_data["indicators"]["atr_14"],
-                    "price_position": analysis["detailed_signals"]["price_position"],
-                },
+                "market_structure": analysis.get("market_structure"),
+                "news_risk": news_risk,
             }
             signal = self.signal_memory.log_signal(signal)
             self.last_signal = signal
@@ -294,6 +309,37 @@ class TradingSkill:
         except Exception as e:
             return {"error": str(e), "timestamp": datetime.now().isoformat()}
 
+    def _calculate_quality_score(
+        self,
+        decision: Dict[str, Any],
+        structure: Optional[Dict[str, Any]],
+        news_risk: Dict[str, Any],
+    ) -> int:
+        """Score setup quality from price structure, break confirmation, and news risk."""
+        if news_risk.get("should_block"):
+            return 0
+        if not structure:
+            return 0
+
+        score = 0
+        if structure.get("structure") in {"HH_HL", "LH_LL"}:
+            score += 45
+        elif structure.get("structure") == "MIXED":
+            score += 20
+
+        if structure.get("break_of_structure") in {"BULLISH_BOS", "BEARISH_BOS"}:
+            score += 35
+
+        if decision.get("decision") in {"BUY", "SELL"}:
+            score += 10
+
+        if news_risk.get("status") == "ALLOW":
+            score += 10
+        elif news_risk.get("status") == "UNAVAILABLE":
+            score += 3
+
+        return min(100, score)
+
     def record_signal_feedback(
         self,
         signal_id: Optional[str] = None,
@@ -315,6 +361,11 @@ class TradingSkill:
         """Return signal feedback and reward/penalty summary."""
         return self.signal_memory.summary()
 
+    def get_news_risk(self) -> Dict[str, Any]:
+        """Return high-impact news risk for this skill's configured symbol."""
+        symbol = self.data_collector.symbol
+        return self.news_risk_agent.evaluate(symbol)
+
 
 def skill_handler(action: str, **kwargs) -> Dict[str, Any]:
     """
@@ -325,6 +376,7 @@ def skill_handler(action: str, **kwargs) -> Dict[str, Any]:
       skill_handler("signals")                   # Get signals for watchlist
       skill_handler("feedback", signal_id="...", outcome="win", reward=1)
       skill_handler("learning")                  # Get feedback summary
+      skill_handler("news")                      # Check high-impact news risk
       skill_handler("backtest")                  # Run backtest
       skill_handler("retrain", timesteps=100000) # Retrain model
       skill_handler("stats")                      # Get statistics
@@ -372,6 +424,7 @@ def skill_handler(action: str, **kwargs) -> Dict[str, Any]:
         "backtest": skill.run_backtest,
         "retrain": skill.retrain_model,
         "stats": skill.get_trading_stats,
+        "news": skill.get_news_risk,
         "feedback": skill.record_signal_feedback,
         "learning": skill.get_learning_summary,
     }

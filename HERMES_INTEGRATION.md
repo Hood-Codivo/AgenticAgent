@@ -292,13 +292,11 @@ print(skill_handler("signal", data_provider="deriv", symbol="GBPUSD", interval="
 print(skill_handler("signals", data_provider="yfinance", symbols=["EURUSD", "AAPL", "BTCUSD"]))
 ```
 
-When `HERMES_USE_PPO=true`, live signal flow is:
+Live signal flow is:
 
 ```text
-live candles -> indicators -> 30-bar PPO observation -> model.predict() -> BUY/SELL/HOLD -> reward/penalty memory
+live candles -> swing highs/lows -> trend structure -> candle-close BOS -> BUY/SELL/HOLD -> reward/penalty memory
 ```
-
-The bundled model was trained on EURUSD-like 1-hour forex data. Signals for stocks and crypto are experimental until you train models for those assets.
 
 ## Troubleshooting
 

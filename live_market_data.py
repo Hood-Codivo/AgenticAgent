@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 from websockets.sync.client import connect
 
-from indicators import preprocess_ohlcv_dataframe
+from price_action_data import preprocess_ohlcv_dataframe
 
 
 class LiveDataError(RuntimeError):

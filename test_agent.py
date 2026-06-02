@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from indicators import load_and_preprocess_data
+from price_action_data import load_and_preprocess_data
 from trading_env import ForexTradingEnv
 
 

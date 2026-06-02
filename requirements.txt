@@ -45,7 +45,6 @@ networkx==3.4.2
 numpy
 packaging==24.2
 pandas
-pandas-ta==0.4.71b0
 parso==0.8.4
 peewee==3.18.1
 pillow==11.1.0

@@ -5,6 +5,10 @@ Environment:
   TELEGRAM_BOT_TOKEN       Required. Token from BotFather.
   TELEGRAM_ALLOWED_USERS   Optional comma-separated Telegram user IDs.
   TELEGRAM_USER_ID         Optional single allowed user ID fallback.
+  TELEGRAM_ALERT_CHAT_IDS  Optional comma-separated chat IDs for trade alerts.
+  HERMES_ALERT_MONITOR     Set true to enable automatic setup alerts.
+  HERMES_ALERT_POLL_SECONDS Seconds between watchlist checks. Default: 900.
+  HERMES_ALERT_QUALITY_MIN Minimum quality score for alerts. Default: 90.
 """
 
 import argparse
@@ -13,6 +17,7 @@ import os
 import shlex
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -22,8 +27,7 @@ import requests
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# pandas_ta can trip Numba's cache loader in some Python/package layouts before
-# any bot command runs. Disabling JIT for the bot process keeps startup reliable.
+# Disabling JIT for the bot process keeps startup reliable in mixed ML installs.
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
@@ -41,6 +45,10 @@ Commands:
 /feedback win|loss [SIGNAL_ID] [notes] - Record feedback
 /help - Show this menu
 """
+
+ALERT_STATE_PATH = PROJECT_ROOT / "telegram_alert_state.json"
+DEFAULT_ALERT_POLL_SECONDS = 15 * 60
+DEFAULT_ALERT_REPEAT_SECONDS = 6 * 60 * 60
 
 
 class TelegramAPIError(RuntimeError):
@@ -93,6 +101,41 @@ def allowed_users_from_env() -> Optional[set[int]]:
         except ValueError:
             print(f"Skipping invalid Telegram user ID: {item}", file=sys.stderr)
     return users or None
+
+
+def int_set_from_env(name: str) -> Optional[set[int]]:
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+
+    values = set()
+    for item in raw.replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.add(int(item))
+        except ValueError:
+            print(f"Skipping invalid {name}: {item}", file=sys.stderr)
+    return values or None
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        print(f"Invalid {name}={raw!r}; using {default}.", file=sys.stderr)
+        return default
 
 
 def telegram_request(token: str, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -237,7 +280,7 @@ def format_signal(signal: Dict[str, Any]) -> str:
         lines.append(f"Quality: {signal.get('quality_score')}/100")
     if signal.get("current_price") is not None:
         lines.append(f"Price: {fmt_num(signal.get('current_price'))}")
-    if signal.get("filtered") is True:
+    if signal.get("filtered") is True or signal.get("action") == "HOLD":
         lines.append("Status: filtered / no trade")
     if signal.get("reason") or signal.get("reasoning"):
         lines.append(f"Reason: {signal.get('reason') or signal.get('reasoning')}")
@@ -256,17 +299,49 @@ def format_signal(signal: Dict[str, Any]) -> str:
             ]
         )
 
-    market = signal.get("market_analysis") or {}
+    market = signal.get("market_structure") or {}
     if market:
         lines.extend(
             [
                 "",
-                "Market:",
-                f"RSI: {fmt_num(market.get('rsi'))}",
-                f"MA trend: {market.get('ma_trend', 'n/a')}",
-                f"Volatility: {fmt_num(market.get('volatility'))}",
+                "Market structure:",
+                f"Trend: {market.get('trend', 'n/a')}",
+                f"Structure: {market.get('structure', 'n/a')}",
+                f"Break: {market.get('break_of_structure', 'n/a')}",
             ]
         )
+        if market.get("waiting_for"):
+            lines.append(f"Waiting for: {market.get('waiting_for')}")
+        if market.get("trigger_price") is not None:
+            lines.append(f"Trigger: {fmt_num(market.get('trigger_price'))}")
+        if market.get("invalidation_price") is not None:
+            lines.append(f"Invalidation: {fmt_num(market.get('invalidation_price'))}")
+        current_peak = market.get("current_peak") or {}
+        current_trough = market.get("current_trough") or {}
+        if current_peak or current_trough:
+            lines.extend(
+                [
+                    f"Swing high: {fmt_num(current_peak.get('price'))}",
+                    f"Swing low: {fmt_num(current_trough.get('price'))}",
+                ]
+            )
+
+    news = signal.get("news_risk") or {}
+    if news:
+        lines.extend(
+            [
+                "",
+                "News risk:",
+                f"Status: {news.get('status', 'n/a')}",
+                f"Reason: {news.get('reason', 'n/a')}",
+            ]
+        )
+        events = news.get("events") or []
+        if events:
+            event = events[0]
+            lines.append(
+                f"Nearest high impact: {event.get('currency', 'n/a')} {event.get('title', 'n/a')} ({fmt_num(event.get('minutes_to_event'))} min)"
+            )
 
     return "\n".join(lines)
 
@@ -278,6 +353,150 @@ def format_signals(result: Dict[str, Any]) -> str:
     if not signals:
         return "No signals returned."
     return "\n\n".join(format_signal(signal) for signal in signals)
+
+
+def format_alert(signal: Dict[str, Any]) -> str:
+    return "Trade alert\n" + format_signal(signal)
+
+
+def is_alert_signal(signal: Dict[str, Any], min_quality: int) -> bool:
+    if signal.get("error") or signal.get("filtered") is True:
+        return False
+
+    action = signal.get("action")
+    market = signal.get("market_structure") or {}
+    structure = market.get("structure")
+    bos = market.get("break_of_structure")
+    quality = signal.get("quality_score") or 0
+
+    try:
+        quality = int(float(quality))
+    except (TypeError, ValueError):
+        quality = 0
+
+    bullish_setup = action == "BUY" and structure == "HH_HL" and bos == "BULLISH_BOS"
+    bearish_setup = action == "SELL" and structure == "LH_LL" and bos == "BEARISH_BOS"
+    return quality >= min_quality and (bullish_setup or bearish_setup)
+
+
+def alert_key(signal: Dict[str, Any]) -> str:
+    market = signal.get("market_structure") or {}
+    parts = [
+        str(signal.get("symbol", "UNKNOWN")),
+        str(signal.get("action", "HOLD")),
+        str(market.get("structure", "n/a")),
+        str(market.get("break_of_structure", "n/a")),
+        fmt_num(market.get("trigger_price")),
+        fmt_num(market.get("invalidation_price")),
+    ]
+    return "|".join(parts)
+
+
+def load_alert_state() -> Dict[str, float]:
+    if not ALERT_STATE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(ALERT_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    state = {}
+    for key, value in data.items():
+        try:
+            state[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return state
+
+
+def save_alert_state(state: Dict[str, float]) -> None:
+    ALERT_STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def should_send_alert(
+    signal: Dict[str, Any],
+    state: Dict[str, float],
+    now: float,
+    repeat_seconds: int,
+) -> bool:
+    key = alert_key(signal)
+    last_sent = state.get(key)
+    if last_sent is not None and now - last_sent < repeat_seconds:
+        return False
+    state[key] = now
+    return True
+
+
+def get_alert_chat_ids(allowed_users: Optional[set[int]]) -> List[int]:
+    chat_ids = int_set_from_env("TELEGRAM_ALERT_CHAT_IDS")
+    if chat_ids:
+        return sorted(chat_ids)
+    if allowed_users:
+        return sorted(allowed_users)
+    return []
+
+
+def collect_alerts(min_quality: int) -> List[Dict[str, Any]]:
+    result = get_trading_handler()("signals", verbose=False)
+    signals = result.get("signals", []) if isinstance(result, dict) else []
+    return [signal for signal in signals if is_alert_signal(signal, min_quality)]
+
+
+def run_alert_check(
+    token: str,
+    chat_ids: List[int],
+    min_quality: int,
+    repeat_seconds: int,
+) -> int:
+    state = load_alert_state()
+    now = time.time()
+    sent = 0
+    for signal_data in collect_alerts(min_quality):
+        if not should_send_alert(signal_data, state, now, repeat_seconds):
+            continue
+        for chat_id in chat_ids:
+            send_message(token, chat_id, format_alert(signal_data))
+            sent += 1
+    save_alert_state(state)
+    return sent
+
+
+def start_alert_monitor(
+    token: str,
+    chat_ids: List[int],
+    stop_event: threading.Event,
+) -> Optional[threading.Thread]:
+    if not env_bool("HERMES_ALERT_MONITOR", default=False):
+        return None
+    if not chat_ids:
+        print(
+            "HERMES_ALERT_MONITOR is enabled, but no TELEGRAM_ALERT_CHAT_IDS or TELEGRAM_ALLOWED_USERS are set.",
+            file=sys.stderr,
+        )
+        return None
+
+    poll_seconds = env_int("HERMES_ALERT_POLL_SECONDS", DEFAULT_ALERT_POLL_SECONDS, minimum=60)
+    repeat_seconds = env_int("HERMES_ALERT_REPEAT_SECONDS", DEFAULT_ALERT_REPEAT_SECONDS, minimum=60)
+    min_quality = env_int("HERMES_ALERT_QUALITY_MIN", 90, minimum=0)
+
+    def monitor() -> None:
+        print(
+            f"Trade alert monitor started: every {poll_seconds}s, quality >= {min_quality}, chats: {chat_ids}"
+        )
+        while not stop_event.is_set():
+            try:
+                sent = run_alert_check(token, chat_ids, min_quality, repeat_seconds)
+                if sent:
+                    print(f"Trade alert monitor sent {sent} message(s).")
+            except Exception as exc:
+                print(f"Trade alert monitor error: {exc}", file=sys.stderr)
+            stop_event.wait(poll_seconds)
+        print("Trade alert monitor stopped.")
+
+    thread = threading.Thread(target=monitor, name="trade-alert-monitor", daemon=True)
+    thread.start()
+    return thread
 
 
 def format_stats(stats: Dict[str, Any]) -> str:
@@ -404,10 +623,13 @@ def run_bot(token: str, allowed_users: Optional[set[int]]) -> None:
         print("Warning: TELEGRAM_ALLOWED_USERS is not set; all users can access this bot.")
 
     stop = False
+    stop_event = threading.Event()
+    monitor_thread = start_alert_monitor(token, get_alert_chat_ids(allowed_users), stop_event)
 
     def request_stop(_signum: int, _frame: Any) -> None:
         nonlocal stop
         stop = True
+        stop_event.set()
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
@@ -442,18 +664,35 @@ def run_bot(token: str, allowed_users: Optional[set[int]]) -> None:
             print(f"Telegram API error: {exc}", file=sys.stderr)
             time.sleep(5)
 
+    stop_event.set()
+    if monitor_thread is not None:
+        monitor_thread.join(timeout=5)
     print("Hermes Telegram bot stopped.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Hermes trading Telegram bot.")
     parser.add_argument("--once", metavar="COMMAND", help="Run one bot command locally for testing.")
+    parser.add_argument(
+        "--monitor-once",
+        action="store_true",
+        help="Run one automatic alert scan locally and print matching alerts.",
+    )
     args = parser.parse_args()
 
     load_default_env()
 
     if args.once:
         print(handle_command(args.once))
+        return 0
+
+    if args.monitor_once:
+        min_quality = env_int("HERMES_ALERT_QUALITY_MIN", 90, minimum=0)
+        alerts = collect_alerts(min_quality)
+        if not alerts:
+            print(f"No alert setups found with quality >= {min_quality}.")
+            return 0
+        print("\n\n".join(format_alert(signal_data) for signal_data in alerts))
         return 0
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")

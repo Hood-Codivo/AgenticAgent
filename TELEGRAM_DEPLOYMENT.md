@@ -35,6 +35,7 @@ Set:
 ```bash
 export TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
 export TELEGRAM_ALLOWED_USERS="YOUR_TELEGRAM_USER_ID"
+export TELEGRAM_ALERT_CHAT_IDS="YOUR_TELEGRAM_USER_ID"
 export HERMES_DATA_PROVIDER="yfinance"
 export HERMES_WATCHLIST="EURUSD,GBPUSD,AAPL,BTCUSD"
 export HERMES_INTERVAL="1h"
@@ -42,6 +43,10 @@ export HERMES_USE_PPO="true"
 export HERMES_MODEL_PATH="/home/godwin/Downloads/AI_agent/model_eurusd_best.zip"
 export HERMES_MIN_CONFIDENCE="0.50"
 export HERMES_REQUIRE_TECH_CONFIRM="false"
+export HERMES_ALERT_MONITOR="true"
+export HERMES_ALERT_POLL_SECONDS="900"
+export HERMES_ALERT_QUALITY_MIN="90"
+export HERMES_ALERT_REPEAT_SECONDS="21600"
 ```
 
 If your Groq key is invalid, comment it out for now:
